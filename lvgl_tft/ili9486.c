@@ -12,7 +12,9 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
+#ifdef CONFIG_LV_DISPLAY_USE_SHIFT_REG
+#include "shift_reg.h"
+#endif
 /*********************
  *      DEFINES
  *********************/
@@ -64,12 +66,20 @@ void ili9486_init(void)
 		{0x29, {0}, 0x80},			/* display on */
 		{0x00, {0}, 0xff},
 	};
-
+#ifdef CONFIG_LV_DISPLAY_USE_SHIFT_REG
+	config_shift_register();
+#else
 	//Initialize non-SPI GPIOs
     gpio_pad_select_gpio(ILI9486_DC);
 	gpio_set_direction(ILI9486_DC, GPIO_MODE_OUTPUT);
-
-#if ILI9486_USE_RST
+#endif
+	//Reset the display
+#ifdef CONFIG_LV_DISPLAY_USE_RST_SHIFTREG
+	shift_bit(CONFIG_LV_DISP_PIN_RST_SHIFTREG, 0);
+	vTaskDelay(100 / portTICK_RATE_MS);
+	shift_bit(CONFIG_LV_DISP_PIN_RST_SHIFTREG, 1);
+	vTaskDelay(100 / portTICK_RATE_MS);
+#elif ILI9486_USE_RST
     gpio_pad_select_gpio(ILI9486_RST);
 	gpio_set_direction(ILI9486_RST, GPIO_MODE_OUTPUT);
 
@@ -79,7 +89,6 @@ void ili9486_init(void)
 	gpio_set_level(ILI9486_RST, 1);
 	vTaskDelay(100 / portTICK_RATE_MS);
 #endif
-
 	ESP_LOGI(TAG, "ILI9486 Initialization.");
 
 	//Send all the commands
@@ -135,7 +144,11 @@ static void ili9486_send_cmd(uint8_t cmd)
         };
 
 	disp_wait_for_pending_transactions();
+#ifdef CONFIG_LV_DISPLAY_USE_DC_SHIFTREG
+	shift_bit(CONFIG_LV_DISP_PIN_DC_SHIFTREG,0);
+#else
 	gpio_set_level(ILI9486_DC, 0);	 /*Command mode*/
+#endif
 	disp_spi_send_data(to16bit, sizeof to16bit);
 }
 
@@ -152,15 +165,23 @@ static void ili9486_send_data(void * data, uint16_t length)
 	}
 
 	disp_wait_for_pending_transactions();
+#ifdef CONFIG_LV_DISPLAY_USE_DC_SHIFTREG
+	shift_bit(CONFIG_LV_DISP_PIN_DC_SHIFTREG,1);
+#else
 	gpio_set_level(ILI9486_DC, 1);	 /*Data mode*/
+#endif
 	disp_spi_send_data(to16bit, (length*2));
 }
 
 static void ili9486_send_color(void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ILI9486_DC, 1);   /*Data mode*/
-    disp_spi_send_colors(data, length);
+#ifdef CONFIG_LV_DISPLAY_USE_DC_SHIFTREG
+	shift_bit(CONFIG_LV_DISP_PIN_DC_SHIFTREG,1);
+#else
+	gpio_set_level(ILI9486_DC, 1);   /*Data mode*/
+#endif
+	disp_spi_send_colors(data, length);
 }
 
 static void ili9486_set_orientation(uint8_t orientation)
@@ -182,3 +203,4 @@ static void ili9486_set_orientation(uint8_t orientation)
     ili9486_send_cmd(0x36);
     ili9486_send_data((void *) &data[orientation], 1);
 }
+
